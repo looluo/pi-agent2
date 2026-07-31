@@ -1,0 +1,24 @@
+[package]
+name = "pi-agent"
+version = "0.1.0"
+edition = "2021"
+
+
+[[bin]]
+name = "pi-agent"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+dirs = "6"
+tauri = { version = "2", features = [] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[profile.release]
+opt-level = 0
+debug = false
+strip = true
+lto = false
+codegen-units = 16

@@ -1,0 +1,16 @@
+{
+  "name": "pi-agent-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Windows Tauri desktop wrapper for pi-web",
+  "scripts": {
+    "prepare:desktop": "node scripts/prepare-desktop-runtime.mjs",
+    "build:exe": "npm run prepare:desktop && cargo build --manifest-path src-tauri/Cargo.toml --release && node scripts/copy-desktop-exe.mjs",
+    "tauri:build": "npm run prepare:desktop && npx tauri build",
+    "build": "npm run build:exe"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.9.3",
+    "yazl": "^3.3.1"
+  }
+}

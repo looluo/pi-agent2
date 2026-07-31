@@ -1,0 +1,9 @@
+node_modules/
+.desktop-build/
+dist/
+src-tauri/target/
+src-tauri/resources/runtime-bundle.zip
+src-tauri/resources/node-v24.14.1-win-x64.zip
+.DS_Store
+
+src-tauri/gen/
