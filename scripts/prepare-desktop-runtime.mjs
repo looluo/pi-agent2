@@ -39,6 +39,14 @@ async function run(command, args, cwd, env = {}) {
   await new Promise((resolve, reject) => {
     const useShell = process.platform === "win32" && (command === "npm" || command === "npx");
     const childEnv = { ...process.env };
+    // Strip inherited Next.js private env vars from the parent process. When this
+    // script runs inside another Next.js app (e.g. the pi desktop harness), those
+    // vars override next.config.ts values and silently break standalone tracing.
+    for (const key of Object.keys(childEnv)) {
+      if (key.startsWith("__NEXT_PRIVATE") || key.startsWith("__NEXT_") || key === "NEXT_DEPLOYMENT_ID" || key === "_NEXT_DATA") {
+        delete childEnv[key];
+      }
+    }
     for (const [key, value] of Object.entries(env)) {
       if (value === undefined || value === null) delete childEnv[key];
       else childEnv[key] = String(value);
@@ -115,7 +123,7 @@ async function patchPiWeb() {
   if (!nextConfig.includes('output: "standalone"')) {
     nextConfig = nextConfig.replace(
       "const nextConfig: NextConfig = {",
-      'const nextConfig: NextConfig = {\n  output: "standalone",\n  outputFileTracingRoot: __dirname,\n  generateBuildId: async () => "pi-agent-app",',
+      'const nextConfig: NextConfig = {\n  output: "standalone",\n  outputFileTracingRoot: process.cwd(),\n  generateBuildId: async () => "pi-agent-app",',
     );
     await writeFile(nextConfigPath, nextConfig, "utf8");
   }
@@ -156,7 +164,6 @@ async function copyRuntimeOutput() {
   if (await pathExists(standaloneDir)) {
     console.log("[prepare:desktop] Using Next standalone output");
     await cp(standaloneDir, join(bundleRoot, "app"), { recursive: true });
-    await copyRuntimeStatics();
   } else {
     console.log("[prepare:desktop] Next standalone directory was not emitted; bundling pruned production node_modules instead");
     await run("npm", ["prune", "--omit=dev", "--no-audit", "--fund=false", "--loglevel=warn"], patchedPiWeb);
@@ -167,8 +174,80 @@ async function copyRuntimeOutput() {
   }
 
   await copyRuntimeStatics();
+  await copyEarendilRuntimeAssets();
+  await stripBuildOnlyPackages();
   await mkdir(join(bundleRoot, "node"), { recursive: true });
   await cp(nodeZipPath, join(bundleRoot, "node", nodeArchive));
+}
+
+async function copyEarendilRuntimeAssets() {
+  // Next's standalone tracer misses dynamically-imported modules and packaged
+  // assets inside the pi packages (e.g. theme JSON, clipboard-image.js, native
+  // binaries). Copy the full package trees from the installed node_modules on
+  // top of the standalone output so nothing is missing at runtime. Non-win32
+  // native binaries are stripped afterwards by stripBuildOnlyPackages().
+  const packages = ["pi-coding-agent", "pi-ai", "pi-agent-core", "pi-tui"];
+  for (const pkg of packages) {
+    const source = join(patchedPiWeb, "node_modules", "@earendil-works", pkg);
+    const destination = join(bundleRoot, "app", "node_modules", "@earendil-works", pkg);
+    if (await pathExists(source)) {
+      await cp(source, destination, {
+        recursive: true,
+        filter: (src) => {
+          const rel = relative(source, src).replaceAll("\\", "/");
+          if (!rel) return true;
+          if (rel.endsWith(".map") || rel.endsWith(".d.ts")) return false;
+          if (rel.includes("/test/") || rel.includes("/tests/") || rel.includes("/__tests__/")) return false;
+          if (rel.startsWith("examples/")) return false;
+          return true;
+        },
+      });
+      console.log(`[prepare:desktop] Copied full @earendil-works/${pkg}`);
+    }
+  }
+}
+
+async function stripBuildOnlyPackages() {
+  // @next/swc-* contains the native SWC compiler used at build time only.
+  // The Next standalone server serves pre-built output and the nft traces
+  // reference none of these binaries at runtime, so they are safe to remove.
+  const swcRoot = join(bundleRoot, "app", "node_modules", "@next");
+  if (await pathExists(swcRoot)) {
+    for (const entry of await readdir(swcRoot)) {
+      if (entry.startsWith("swc-")) {
+        await rm(join(swcRoot, entry), { recursive: true, force: true });
+        console.log(`[prepare:desktop] Stripped build-only package @next/${entry}`);
+      }
+    }
+  }
+  // Remove native binaries for platforms other than win32-x64.
+  let stripped = 0;
+  const bundleApp = join(bundleRoot, "app");
+  for await (const file of findFiles(bundleApp)) {
+    const rel = relative(bundleApp, file).replaceAll("\\", "/").toLowerCase();
+    if (!isForeignNativeBinary(rel)) continue;
+    await rm(file, { force: true });
+    stripped += 1;
+  }
+  if (stripped > 0) console.log(`[prepare:desktop] Stripped ${stripped} non-win32-x64 native binaries`);
+}
+
+async function* findFiles(dir) {
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) yield* findFiles(path);
+    else if (entry.isFile()) yield path;
+  }
+}
+
+function isForeignNativeBinary(rel) {
+  if (rel.endsWith(".dylib") || rel.endsWith(".so")) return true;
+  if (rel.endsWith(".node") && (rel.includes("darwin") || rel.includes("linux") || rel.includes("arm64") || rel.includes("riscv"))) return true;
+  if ((rel.includes("/darwin/") || rel.includes("/linux/")) && (rel.includes("prebuilds") || rel.includes("/native/"))) return true;
+  // @mariozechner ships per-platform native binaries in clipboard-<platform> dirs.
+  // Only strip the non-win32-x64 ones — never touch pi-coding-agent's own JS.
+  if (rel.includes("@mariozechner/clipboard-") && !rel.includes("clipboard-win32-x64")) return true;
+  return false;
 }
 
 async function copyRuntimeStatics() {
