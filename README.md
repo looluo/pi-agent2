@@ -24,7 +24,7 @@ The build produces:
 dist/pi-agent.exe
 ```
 
-`pi-agent.exe` embeds a runtime bundle containing Node.js v24.14.1 for Windows x64 and a production Pi Web build. On first run it extracts that bundle under the user's local app data directory, starts Pi Web on `127.0.0.1:30141` or another free loopback port, then opens it in the Tauri window.
+`pi-agent.exe` embeds a runtime bundle containing Node.js v24.14.1 for Windows x64 and a production Pi Web standalone build. On first run it extracts that bundle under the user's local app data directory, starts Pi Web on `127.0.0.1:30141` or another free loopback port without opening a terminal window, then opens it in the Tauri window.
 
 ## Notes
 

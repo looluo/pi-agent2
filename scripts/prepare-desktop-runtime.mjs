@@ -38,9 +38,14 @@ async function run(command, args, cwd, env = {}) {
   console.log(`[prepare:desktop] $ ${command} ${args.join(" ")}  (cwd: ${displayCwd})`);
   await new Promise((resolve, reject) => {
     const useShell = process.platform === "win32" && (command === "npm" || command === "npx");
+    const childEnv = { ...process.env };
+    for (const [key, value] of Object.entries(env)) {
+      if (value === undefined || value === null) delete childEnv[key];
+      else childEnv[key] = String(value);
+    }
     const child = spawn(command, args, {
       cwd,
-      env: { ...process.env, ...env },
+      env: childEnv,
       stdio: "inherit",
       shell: useShell,
     });
@@ -77,7 +82,9 @@ async function copyForBundle(from, to) {
     filter: (src) => {
       const rel = relative(from, src).replaceAll("\\", "/");
       if (!rel) return true;
+      if (rel === "cache" || rel.startsWith("cache/")) return false;
       if (rel === ".next/cache" || rel.startsWith(".next/cache/")) return false;
+      if (rel === "diagnostics" || rel.startsWith("diagnostics/")) return false;
       if (rel === ".next/diagnostics" || rel.startsWith(".next/diagnostics/")) return false;
       if (rel.endsWith(".map")) return false;
       return true;
@@ -108,7 +115,7 @@ async function patchPiWeb() {
   if (!nextConfig.includes('output: "standalone"')) {
     nextConfig = nextConfig.replace(
       "const nextConfig: NextConfig = {",
-      'const nextConfig: NextConfig = {\n  output: "standalone",\n  generateBuildId: async () => "pi-agent-app",',
+      'const nextConfig: NextConfig = {\n  output: "standalone",\n  outputFileTracingRoot: __dirname,\n  generateBuildId: async () => "pi-agent-app",',
     );
     await writeFile(nextConfigPath, nextConfig, "utf8");
   }
@@ -230,6 +237,7 @@ await run(process.execPath, [join(patchedPiWeb, "node_modules", "next", "dist", 
   USERPROFILE: safeHome,
   APPDATA: join(safeHome, "AppData", "Roaming"),
   LOCALAPPDATA: join(safeHome, "AppData", "Local"),
+  TURBOPACK: null,
 });
 await copyRuntimeOutput();
 await zipRuntimeBundle();

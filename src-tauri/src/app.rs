@@ -12,9 +12,15 @@ use std::{
 use tauri::{Manager, WebviewWindow, WindowEvent};
 use zip::ZipArchive;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 const APP_TITLE: &str = "Pi Agent App";
 const PREFERRED_PORT: u16 = 30141;
-const RUNTIME_VERSION: &str = "node-v24.14.1-next-runtime-v1";
+const RUNTIME_VERSION: &str = "node-v24.14.1-next-runtime-v2";
 const RUNTIME_ZIP: &[u8] = include_bytes!("../resources/runtime-bundle.zip");
 
 pub fn run() {
@@ -63,7 +69,8 @@ fn start_pi_web(window: WebviewWindow, child_slot: Arc<Mutex<Option<Child>>>) ->
         .map_err(|error| format!("Failed to open log file {}: {error}", log_path.display()))?;
     let log_err = log.try_clone().map_err(|error| format!("Failed to clone log handle: {error}"))?;
 
-    let child = Command::new(&node_exe)
+    let mut command = Command::new(&node_exe);
+    command
         .arg(&server_js)
         .current_dir(&app_dir)
         .env("NODE_ENV", "production")
@@ -71,7 +78,11 @@ fn start_pi_web(window: WebviewWindow, child_slot: Arc<Mutex<Option<Child>>>) ->
         .env("PORT", port.to_string())
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
-        .stderr(Stdio::from(log_err))
+        .stderr(Stdio::from(log_err));
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+
+    let child = command
         .spawn()
         .map_err(|error| format!("Failed to launch {}: {error}", node_exe.display()))?;
     *child_slot.lock().map_err(|_| "Local Pi Web server child lock was poisoned".to_string())? = Some(child);
