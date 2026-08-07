@@ -20,7 +20,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 const APP_TITLE: &str = "Pi Agent App";
 const PREFERRED_PORT: u16 = 30141;
-const RUNTIME_VERSION: &str = "node-v24.14.1-next-runtime-v4";
+const RUNTIME_VERSION: &str = "node-v24.14.1-next-runtime-v5";
 const RUNTIME_ZIP: &[u8] = include_bytes!("../resources/runtime-bundle.zip");
 
 pub fn run() {
