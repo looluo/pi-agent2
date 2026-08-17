@@ -123,7 +123,7 @@ async function patchPiWeb() {
   if (!nextConfig.includes('output: "standalone"')) {
     nextConfig = nextConfig.replace(
       "const nextConfig: NextConfig = {",
-      'const nextConfig: NextConfig = {\n  output: "standalone",\n  outputFileTracingRoot: process.cwd(),\n  generateBuildId: async () => "pi-agent-app",',
+      'const nextConfig: NextConfig = {\n  output: "standalone",\n  generateBuildId: async () => "pi-agent-app",',
     );
     await writeFile(nextConfigPath, nextConfig, "utf8");
   }
