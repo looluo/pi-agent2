@@ -175,6 +175,7 @@ async function copyRuntimeOutput() {
 
   await copyRuntimeStatics();
   await copyEarendilRuntimeAssets();
+  await copyNodePtyPrebuilds();
   await stripBuildOnlyPackages();
   await mkdir(join(bundleRoot, "node"), { recursive: true });
   await cp(nodeZipPath, join(bundleRoot, "node", nodeArchive));
@@ -207,6 +208,20 @@ async function copyEarendilRuntimeAssets() {
   }
 }
 
+async function copyNodePtyPrebuilds() {
+  // node-pty probes prebuilds/<platform>-<arch> at runtime (lib/utils.js), so
+  // Next's standalone tracer never sees the native binding. Copy the win32-x64
+  // prebuild (minus PDB debug symbols) next to the traced JS.
+  const source = join(patchedPiWeb, "node_modules", "node-pty", "prebuilds", "win32-x64");
+  const destination = join(bundleRoot, "app", "node_modules", "node-pty", "prebuilds", "win32-x64");
+  if (await pathExists(source)) {
+    await cp(source, destination, { recursive: true, filter: (src) => !src.endsWith(".pdb") });
+    console.log("[prepare:desktop] Copied node-pty win32-x64 prebuild");
+  } else {
+    console.log("[prepare:desktop] node-pty not installed; skipping prebuild copy");
+  }
+}
+
 async function stripBuildOnlyPackages() {
   // @next/swc-* contains the native SWC compiler used at build time only.
   // The Next standalone server serves pre-built output and the nft traces
@@ -220,6 +235,17 @@ async function stripBuildOnlyPackages() {
       }
     }
   }
+  // pi-coding-agent 0.85+ bundles esbuild binaries for every platform inside
+  // its nested node_modules (plain ELF executables that the extension-based
+  // foreign-binary rules below never match). Keep only the win32-x64 package
+  // and drop the other platform packages (~200 MiB uncompressed).
+  let esbuildStripped = 0;
+  for await (const dir of findScopedPackageDirs(join(bundleRoot, "app"), "@esbuild")) {
+    if (dir.replaceAll("\\", "/").endsWith("@esbuild/win32-x64")) continue;
+    await rm(dir, { recursive: true, force: true });
+    esbuildStripped += 1;
+  }
+  if (esbuildStripped > 0) console.log(`[prepare:desktop] Stripped ${esbuildStripped} non-win32-x64 @esbuild platform packages`);
   // Remove native binaries for platforms other than win32-x64.
   let stripped = 0;
   const bundleApp = join(bundleRoot, "app");
@@ -238,6 +264,25 @@ async function* findFiles(dir) {
     if (entry.isDirectory()) yield* findFiles(path);
     else if (entry.isFile()) yield path;
   }
+}
+
+async function* findScopedPackageDirs(root, scope) {
+  // Yields every directory that is itself a package under node_modules/<scope>/,
+  // at any nesting depth (e.g. inside another package's nested node_modules).
+  const walk = async function* (dir) {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const path = join(dir, entry.name);
+      const parts = relative(root, path).replaceAll("\\", "/").split("/");
+      const i = parts.lastIndexOf("node_modules");
+      if (i !== -1 && parts.length === i + 3 && parts[i + 1] === scope) {
+        yield path;
+        continue;
+      }
+      yield* walk(path);
+    }
+  };
+  yield* walk(root);
 }
 
 function isForeignNativeBinary(rel) {
